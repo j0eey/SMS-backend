@@ -46,7 +46,7 @@ router.get("/", async (req, res, next) => {
           path: "platformId",
           select: "name slug imageUrl"
         })
-        .sort({ createdAt: -1 })
+        .sort({ createdAt: 1 })
         .skip(skip)
         .limit(Number(pageSize))
         .lean(),
@@ -108,7 +108,7 @@ router.get("/search", async (req, res, next) => {
     const total = await ServiceTitle.countDocuments(filter);
     const items = await ServiceTitle.find(filter)
       .populate({ path: "platformId", select: "name imageUrl" })
-      .sort({ createdAt: -1 })
+      .sort({ createdAt: 1 })
       .skip((page - 1) * pageSize)
       .limit(pageSize)
       .lean();

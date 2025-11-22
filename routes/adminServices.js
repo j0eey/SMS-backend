@@ -360,4 +360,53 @@ router.delete("/:id", authMiddleware, requireAdmin, async (req, res, next) => {
   }
 });
 
+
+/**
+ * @desc Bulk update all services’ images by platform
+ * POST /api/admin/services/update-images-by-platform
+ * form-data: { image: File, platformId: string }
+ */
+router.post(
+  "/update-images-by-platform",
+  authMiddleware,
+  requireAdmin,
+  upload.single("image"),
+  async (req, res, next) => {
+    try {
+      const { platformId } = req.body;
+      if (!platformId) {
+        return res.status(400).json({ error: "platformId is required" });
+      }
+
+      if (!req.file) {
+        return res.status(400).json({ error: "image file is required" });
+      }
+
+      // ✅ Path of the uploaded image
+      const imageUrl = `/uploads/services/${req.file.filename}`;
+
+      // ✅ Find all service titles under this platform
+      const serviceTitles = await ServiceTitle.find({ platformId }).select("_id");
+      const serviceTitleIds = serviceTitles.map((t) => t._id);
+
+      if (serviceTitleIds.length === 0) {
+        return res.status(404).json({ error: "No service titles found for this platform" });
+      }
+
+      // ✅ Update all services that belong to those titles
+      const result = await Service.updateMany(
+        { serviceTitleId: { $in: serviceTitleIds } },
+        { $set: { imageUrl } }
+      );
+
+      res.json({
+        message: `✅ Updated ${result.modifiedCount} services successfully.`,
+        imageUrl,
+      });
+    } catch (e) {
+      next(e);
+    }
+  }
+);
+
 export default router;

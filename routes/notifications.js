@@ -11,7 +11,7 @@ const router = express.Router();
 router.get('/', authMiddleware, async (req, res, next) => {
   try {
     const notes = await Notification.find({ userId: req.user.id })
-      .sort({ createdAt: -1 })
+      .sort({ createdAt: 1 })
       .lean();
     res.json(notes);
   } catch (e) {

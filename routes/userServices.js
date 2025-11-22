@@ -31,7 +31,8 @@ function formatService(req, s) {
     stock: s.stock,
     min: s.min,
     max: s.max,
-    status: s.status,
+    status: s.status, // active or inactive
+    isOutOfStock: s.status === "inactive", // ✅ for frontend
     serviceType: s.serviceType,
     provider: s.provider,
     providerServiceId: s.providerServiceId,
@@ -45,7 +46,6 @@ function formatService(req, s) {
 /**
  * @route  GET /api/user/services/search
  * @desc   Search services by name or description
- * @query  ?query=xxx
  */
 router.get("/search", async (req, res, next) => {
   try {
@@ -59,11 +59,11 @@ router.get("/search", async (req, res, next) => {
 
     const regex = new RegExp(q, "i");
 
+    // ✅ include both active and inactive for search
     const filter = {
-      status: "active",
       $or: [{ name: regex }, { description: regex }],
     };
-    // Filter inside specific serviceTitle if provided
+
     if (req.query.serviceTitleSlug) {
       const st = await ServiceTitle.findOne({ slug: req.query.serviceTitleSlug }).select("_id");
       if (st) filter.serviceTitleId = st._id;
@@ -80,6 +80,7 @@ router.get("/search", async (req, res, next) => {
     const total = await Service.countDocuments(filter);
     const services = await Service.find(filter)
       .populate("serviceTitleId", "name slug")
+      .sort({ createdAt: 1 })
       .skip((page - 1) * pageSize)
       .limit(pageSize)
       .lean({ virtuals: true });
@@ -99,12 +100,13 @@ router.get("/search", async (req, res, next) => {
 /**
  * @route  GET /api/user/services
  * @desc   Get paginated services (optional filter by serviceTitleId)
- * @query  ?serviceTitleId=xxx&page=1&pageSize=16
  */
 router.get("/", async (req, res, next) => {
   try {
     const { serviceTitleId, page = 1, pageSize = 16 } = req.query;
-    const filter = { status: "active" };
+
+    // ✅ remove "status: active" filter so we include inactive too
+    const filter = {};
 
     if (req.query.serviceTitleSlug) {
       const st = await ServiceTitle.findOne({ slug: req.query.serviceTitleSlug }).select("_id");
@@ -123,7 +125,7 @@ router.get("/", async (req, res, next) => {
     const [services, total] = await Promise.all([
       Service.find(filter)
         .populate("serviceTitleId", "name slug")
-        .sort({ createdAt: -1 })
+        .sort({ createdAt: 1 }) // ✅ oldest → newest
         .skip(skip)
         .limit(Number(pageSize))
         .lean({ virtuals: true }),
@@ -149,7 +151,6 @@ router.get("/:idOrSlug", async (req, res, next) => {
   try {
     const { idOrSlug } = req.params;
 
-    // Find by ID or slug (safe handling)
     let service;
     if (/^[0-9a-fA-F]{24}$/.test(idOrSlug)) {
       service = await Service.findOne({ _id: idOrSlug })
@@ -198,6 +199,7 @@ router.get("/:idOrSlug", async (req, res, next) => {
       max: service.max,
       stock: service.stock ?? "Unlimited",
       status: service.status,
+      isOutOfStock: service.status === "inactive", // ✅ for frontend
       serviceType: service.serviceType,
       provider: service.provider,
       providerServiceId: service.providerServiceId,
@@ -227,6 +229,5 @@ router.get("/:idOrSlug", async (req, res, next) => {
     next(error);
   }
 });
-
 
 export default router;

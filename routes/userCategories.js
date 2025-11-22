@@ -17,7 +17,7 @@ router.get("/", async (req, res, next) => {
 
     const total = await Category.countDocuments(filter);
     const categories = await Category.find(filter)
-      .sort({ createdAt: -1 })
+      .sort({ createdAt: 1 })
       .skip((page - 1) * pageSize)
       .limit(pageSize)
       .select("_id name slug description status imageUrl createdAt")
@@ -63,7 +63,7 @@ router.get("/search", async (req, res, next) => {
 
     const total = await Category.countDocuments(filter);
     const categories = await Category.find(filter)
-      .sort({ createdAt: -1 })
+      .sort({ createdAt: 1 })
       .skip((page - 1) * pageSize)
       .limit(pageSize)
       .select("_id name slug description status imageUrl createdAt")

@@ -96,7 +96,7 @@ router.get("/search", async (req, res, next) => {
     const total = await Platform.countDocuments(filter);
     const platforms = await Platform.find(filter)
       .populate("categoryId", "name slug")
-      .sort({ createdAt: -1 })
+      .sort({ createdAt: 1 })
       .skip((page - 1) * pageSize)
       .limit(pageSize)
       .lean();

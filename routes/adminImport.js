@@ -15,7 +15,7 @@ const SOCIAL_MEDIA_CATEGORY = "Social Media Services";
 router.post("/import-services", authMiddleware, requireAdmin, async (req, res, next) => {
   try {
     // 1. Fetch external services
-    const { data } = await axios.get("http://localhost:5001/api/secsers/services"); // adjust URL if needed
+    const { data } = await axios.get("http:smslb.shop/api/secsers/services"); // adjust URL if needed
 
     // 2. Ensure base category exists
     let category = await Category.findOne({ name: SOCIAL_MEDIA_CATEGORY });

@@ -10,9 +10,10 @@ const transactionSchema = new mongoose.Schema(
       required: true,
     },
 
+    // ✅ FIXED: added "adjustment" to enum
     type: {
       type: String,
-      enum: ["deposit", "order"],
+      enum: ["deposit", "order", "adjustment"],
       required: true,
     },
 

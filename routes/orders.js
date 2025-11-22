@@ -10,6 +10,7 @@ import { createOrderSchema } from "../validators/orderValidator.js";
 import { validate } from "../utils/validate.js";
 import Counter from "../models/Counter.js";
 import Service from "../models/Service.js";
+import { sendTelegramAlert } from "../utils/telegramNotifier.js"; // ✅ Telegram notifier
 
 const router = express.Router();
 
@@ -27,7 +28,7 @@ router.get("/", authMiddleware, async (req, res, next) => {
       Order.find({ userId: req.user.id })
         .populate("userId", "_id email name balance")
         .populate("service", "name serviceType userPrice price")
-        .sort({ createdAt: -1 })
+        .sort({ createdAt: 1 })
         .skip(skip)
         .limit(pageSize),
       Order.countDocuments({ userId: req.user.id }),
@@ -38,7 +39,7 @@ router.get("/", authMiddleware, async (req, res, next) => {
       pageSize,
       total,
       totalPages: Math.ceil(total / pageSize),
-      items
+      items,
     });
   } catch (e) {
     next(e);
@@ -51,12 +52,12 @@ router.get("/", authMiddleware, async (req, res, next) => {
  */
 router.post("/", authMiddleware, validate(createOrderSchema), async (req, res, next) => {
   try {
-    const { service, quantity, runs, interval /* provider is validated to 'manual' */ } = req.body;
+    const { service, quantity, runs, interval } = req.body;
 
     const user = await User.findById(req.user.id);
     if (!user) return res.status(404).json({ error: "User not found" });
 
-    // Load the service from DB to get the authoritative price for user
+    // Load the service from DB
     let svc;
     if (/^[0-9a-fA-F]{24}$/.test(service)) {
       svc = await Service.findById(service);
@@ -67,9 +68,8 @@ router.post("/", authMiddleware, validate(createOrderSchema), async (req, res, n
       return res.status(400).json({ error: "Invalid service ID" });
     }
 
-    // Calculate total from DB price (userPrice) * quantity
     const qty = Number(quantity) || 1;
-    const unitPrice = Number(svc.userPrice || svc.price || 0); // fallback if userPrice doesn't exist
+    const unitPrice = Number(svc.userPrice || svc.price || 0);
     const totalCost = unitPrice * qty;
 
     // Generate next global order number
@@ -80,7 +80,7 @@ router.post("/", authMiddleware, validate(createOrderSchema), async (req, res, n
     );
     const nextOrderNumber = counter.value;
 
-    // Create LOCAL order (no link; admin will handle manually)
+    // Create LOCAL order
     const local = await Order.create({
       userId: req.user.id,
       service: svc._id,
@@ -94,7 +94,7 @@ router.post("/", authMiddleware, validate(createOrderSchema), async (req, res, n
       orderNumber: nextOrderNumber,
     });
 
-    // Record a pending transaction; balance NOT deducted yet
+    // Record a pending transaction (not yet deducted)
     await Transaction.create({
       userId: req.user.id,
       method: "wallet",
@@ -105,6 +105,17 @@ router.post("/", authMiddleware, validate(createOrderSchema), async (req, res, n
       orderNumber: nextOrderNumber,
     });
 
+    // ✅ Telegram alert
+    await sendTelegramAlert(`
+🧾 *New Order Request*
+👤 *User:* ${user.name || "Unknown"}
+📧 *Email:* ${user.email}
+📦 *Service:* ${svc.name}
+📊 *Quantity:* ${qty}
+💰 *Total Cost:* $${totalCost.toFixed(2)}
+🕒 *Date:* ${new Date().toLocaleString()}
+    `);
+
     return res.json({
       message: "Manual order created. Waiting for admin approval.",
       id: local.id,
@@ -113,6 +124,7 @@ router.post("/", authMiddleware, validate(createOrderSchema), async (req, res, n
       status: local.status,
     });
   } catch (e) {
+    console.error("Error creating order:", e);
     next(e);
   }
 });
@@ -123,7 +135,10 @@ router.post("/", authMiddleware, validate(createOrderSchema), async (req, res, n
  */
 router.get("/:id", authMiddleware, async (req, res, next) => {
   try {
-    const order = await Order.findOne({ _id: req.params.id, userId: req.user.id })
+    const order = await Order.findOne({
+      _id: req.params.id,
+      userId: req.user.id,
+    })
       .populate("service", "name serviceType userPrice price")
       .populate("userId", "_id email name balance");
     if (!order) return res.status(404).json({ error: "Order not found" });
@@ -139,13 +154,17 @@ router.get("/:id", authMiddleware, async (req, res, next) => {
  */
 router.get("/:id/status", authMiddleware, async (req, res, next) => {
   try {
-    const local = await Order.findOne({ _id: req.params.id, userId: req.user.id });
+    const local = await Order.findOne({
+      _id: req.params.id,
+      userId: req.user.id,
+    });
     if (!local) return res.status(404).json({ error: "Order not found" });
 
     if (local.provider !== "secsers") {
       return res.status(400).json({ error: "Only secsers orders can be refreshed automatically" });
     }
-    if (!local.providerOrder) return res.status(400).json({ error: "Order not placed yet" });
+    if (!local.providerOrder)
+      return res.status(400).json({ error: "Order not placed yet" });
 
     const st = await secsers.status(local.providerOrder);
     const oldStatus = local.status;
@@ -184,8 +203,12 @@ router.get("/:id/status", authMiddleware, async (req, res, next) => {
  */
 router.post("/:id/refill", authMiddleware, async (req, res, next) => {
   try {
-    const local = await Order.findOne({ _id: req.params.id, userId: req.user.id });
-    if (!local?.providerOrder) return res.status(404).json({ error: "Order not found" });
+    const local = await Order.findOne({
+      _id: req.params.id,
+      userId: req.user.id,
+    });
+    if (!local?.providerOrder)
+      return res.status(404).json({ error: "Order not found" });
 
     const rf = await secsers.refill(local.providerOrder);
     res.json(rf);

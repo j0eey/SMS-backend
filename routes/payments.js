@@ -6,6 +6,7 @@ import User from '../models/User.js';
 import { authMiddleware } from '../utils/authMiddleware.js';
 import { depositSchema } from '../validators/paymentValidator.js';
 import { validate } from '../utils/validate.js';
+import { sendTelegramAlert } from '../utils/telegramNotifier.js'; // ✅ NEW IMPORT
 
 const router = express.Router();
 
@@ -55,9 +56,24 @@ router.post(
         orderNumber: nextOrderNumber
       });
 
+      // ✅ Fetch user info for the alert
+      const user = await User.findById(req.user.id).select('email name');
+
+      // ✅ Send Telegram alert to admin
+      await sendTelegramAlert(`
+💰 *New Deposit Request*
+👤 *User:* ${user?.name || "Unknown"}
+📧 *Email:* ${user?.email || "N/A"}
+💵 *Amount:* $${Number(amount).toFixed(2)}
+🏦 *Method:* ${method}
+📄 *Reference:* ${reference || "None"}
+🕒 *Time:* ${new Date().toLocaleString()}
+${proofPath ? `📎 *Proof:* ${process.env.BACKEND_URL || ""}${proofPath}` : ""}
+      `);
+
       res.json({
         transactionId: tx.id,
-        orderLabel: `Order #${tx.orderNumber}`, // <-- new field for clarity
+        orderLabel: `Order #${tx.orderNumber}`,
         status: tx.status,
         amount: tx.amount,
         method: tx.method,
@@ -65,7 +81,8 @@ router.post(
         currency: tx.currency,
         proof: proofPath,
         createdAt: tx.createdAt,
-        message: 'Deposit request created. Please send the funds and wait for admin confirmation.'
+        message:
+          'Deposit request created. Please send the funds and wait for admin confirmation.'
       });
     } catch (e) {
       next(e);
@@ -83,7 +100,7 @@ router.get('/history', authMiddleware, async (req, res, next) => {
     if (!user) return res.status(404).json({ error: 'User not found' });
 
     const txs = await Transaction.find({ userId: req.user.id })
-      .sort({ createdAt: -1 })
+      .sort({ createdAt: 1 })
       .lean();
 
     // ✅ Normalize transactions with orderLabel

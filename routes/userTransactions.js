@@ -19,7 +19,7 @@ router.get("/", authMiddleware, async (req, res, next) => {
     const userId = req.user.id; // comes from access token
 
     const transactions = await Transaction.find({ userId, type: "deposit" })
-      .sort({ createdAt: -1 }) // Newest first
+      .sort({ createdAt: 1 }) // Newest first
       .select("-__v") // remove unnecessary fields
       .lean();
 

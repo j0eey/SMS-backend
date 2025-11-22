@@ -1,4 +1,5 @@
 import express from 'express';
+import mongoose from 'mongoose';
 import { authMiddleware, requireAdmin } from '../utils/authMiddleware.js';
 import Order from '../models/Order.js';
 import User from '../models/User.js';
@@ -6,16 +7,16 @@ import Notification from '../models/Notification.js';
 import { sendMail } from '../utils/mailer.js';
 import { secsers } from '../utils/secsersApi.js';
 import Transaction from '../models/Transaction.js';
+import Service from '../models/Service.js';
 
 const router = express.Router();
 
-/**
- * @desc List all orders (filter by status, user, service, provider)
- * GET /api/admin/orders?status=In%20progress&userId=123&service=1&provider=manual
- */
+/* -------------------------------------------------------------------------- */
+/* ✅ 1. PAGINATED ORDERS (basic listing)                                     */
+/* -------------------------------------------------------------------------- */
 router.get('/', authMiddleware, requireAdmin, async (req, res, next) => {
   try {
-    const { status, userId, service, page = 1, provider, search } = req.query;
+    const { status, userId, service, provider, page = 1 } = req.query;
     const pageSize = 10;
 
     const filter = {};
@@ -28,16 +29,67 @@ router.get('/', authMiddleware, requireAdmin, async (req, res, next) => {
 
     const [items, total] = await Promise.all([
       Order.find(filter)
-        .populate({
-          path: 'userId',
-          model: 'User',               // make sure it knows which model
-          select: 'email name balance'
-        })
-        .populate({
-          path: 'service',
-          model: 'Service',
-          select: 'name serviceType price userPrice'
-        })
+        .populate('userId', 'email name balance')
+        .populate('service', 'name serviceType price userPrice')
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(pageSize)
+        .exec(),
+      Order.countDocuments(filter),
+    ]);
+
+    res.json({
+      page: Number(page),
+      pageSize,
+      total,
+      totalPages: Math.ceil(total / pageSize),
+      items,
+    });
+  } catch (e) {
+    console.error('❌ [ADMIN ORDERS] Error listing orders:', e.message);
+    next(e);
+  }
+});
+
+/* -------------------------------------------------------------------------- */
+/* ✅ 2. SEARCH ORDERS (separate endpoint)                                   */
+/* -------------------------------------------------------------------------- */
+router.get('/search', authMiddleware, requireAdmin, async (req, res, next) => {
+  try {
+    const { query = "", page = 1, pageSize = 10 } = req.query;
+    const s = String(query).trim();
+    if (!s) return res.status(400).json({ error: "Search query required" });
+
+    const skip = (page - 1) * pageSize;
+    const isNumeric = !isNaN(Number(s));
+
+    // Base conditions
+    const conditions = [];
+
+    if (isNumeric) conditions.push({ orderNumber: Number(s) });
+    else conditions.push({ adminNotes: { $regex: s, $options: "i" } });
+
+    // Find related users and services
+    const [users, services] = await Promise.all([
+      User.find({
+        $or: [
+          { email: { $regex: s, $options: "i" } },
+          { name: { $regex: s, $options: "i" } },
+        ],
+      }).select("_id"),
+      Service.find({ name: { $regex: s, $options: "i" } }).select("_id"),
+    ]);
+
+    if (users.length) conditions.push({ userId: { $in: users.map((u) => u._id) } });
+    if (services.length) conditions.push({ service: { $in: services.map((s) => s._id) } });
+
+    // Build final filter
+    const filter = { $or: conditions };
+
+    const [items, total] = await Promise.all([
+      Order.find(filter)
+        .populate('userId', 'email name balance')
+        .populate('service', 'name serviceType price userPrice')
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(Number(pageSize))
@@ -45,32 +97,17 @@ router.get('/', authMiddleware, requireAdmin, async (req, res, next) => {
       Order.countDocuments(filter),
     ]);
 
-    // Apply search after populate
-    let filteredItems = items;
-    if (search) {
-      const s = String(search).toLowerCase();
-      filteredItems = items.filter(item =>
-        (item.orderNumber && String(item.orderNumber).includes(s)) ||
-        (item.userId?.email && item.userId.email.toLowerCase().includes(s)) ||
-        (item.userId?.name && item.userId.name.toLowerCase().includes(s)) ||
-        (item.service?.name && item.service.name.toLowerCase().includes(s))
-      );
-    }
-
-    const formattedItems = filteredItems.map(item => {
-      if (item.charge) item.charge = Number(item.charge).toFixed(2);
-      return item;
-    });
     res.json({
+      query: s,
       page: Number(page),
       pageSize: Number(pageSize),
-      total: total,
+      total,
       totalPages: Math.ceil(total / pageSize),
-      items: formattedItems
+      items,
     });
   } catch (e) {
-    console.error('❌ [ADMIN ORDERS] Error listing orders:', e.message);
-    next(e);
+    console.error("❌ [ADMIN SEARCH] Error:", e);
+    res.status(500).json({ error: e.message || "Search failed" });
   }
 });
 
